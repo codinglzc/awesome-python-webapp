@@ -37,7 +37,7 @@ class Dict(dict):
 
 def next_id(t=None):
     """
-    根据时间戳和随机数生成 uid 标识符
+    根据时间戳和随机数生成 uid 标识符，达到表中记录的主键id都不一样。
     :param t: unix timestamp, default to None and using time.time().
     :return: Return next id as 50-char string.
     """
