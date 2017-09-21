@@ -1420,7 +1420,7 @@ def _load_module(module_name):
 
 class WSGIApplication(object):
 
-    def __init__(self, document_root=None, **kw):
+    def __init__(self, document_root=None):
         """
         Init a WSGIApplication.
 
