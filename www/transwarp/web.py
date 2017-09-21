@@ -8,7 +8,7 @@ create time: 2017-09-15
 disc: A simple, lightweight, WSGI-compatible web framework.
 """
 
-import threading, datetime, re, urllib, os, mimetypes, cgi, logging, functools
+import threading, datetime, re, urllib, os, mimetypes, cgi, logging, functools, types
 
 # 全局 ThreadLocal 对象，用来存储request和response：
 ctx = threading.local()
@@ -1414,8 +1414,47 @@ def _load_module(module_name):
     return getattr(m, import_module)
 
 class WSGIApplication(object):
+
     def __init__(self, document_root=None, **kw):
-        pass
+        """
+        Init a WSGIApplication.
+
+        :param document_root: document root path.
+        """
+        self._running = False
+        self._document_root = document_root
+
+        self._interceptors = []
+        self._template_engine = None
+
+        self._get_static = {}
+        self._post_static = {}
+
+        self._get_dynamic = {}
+        self._post_dynamic = {}
+
+    def _check_not_running(self):
+        if self._running:
+            raise RuntimeError('Cannot modify WSGIApplication when running.')
+
+    # 设置TemplateEngine：
+    @property
+    def template_engine(self):
+        return self._template_engine
+
+    @template_engine.setter
+    def template_engine(self, engine):
+        self._check_not_running()
+        self._template_engine = engine
+
+    def add_module(self, mod):
+        self._check_not_running()
+        m = mod if isinstance(mod, types.ModuleType) else _load_module(mod)
+        logging.info('Add module: %s' % m.__name__)
+        for name in dir(m):
+            fn = getattr(m, name)
+            if callable(fn) and hasattr(fn, '__web_route__') and hasattr(fn, '__web_method__'):
+                self.add_url(fn)
 
     # 添加一个URL定义：
     def add_url(self, func):
@@ -1423,15 +1462,6 @@ class WSGIApplication(object):
 
     # 添加一个Interceptor定义：
     def add_interceptor(self, func):
-        pass
-
-    # 设置TemplateEngine：
-    @property
-    def template_engine(self):
-        pass
-
-    @template_engine.setter
-    def template_engine(self, engine):
         pass
 
     # 返回WSGI处理函数：
