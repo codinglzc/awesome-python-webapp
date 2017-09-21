@@ -378,28 +378,18 @@ class Model(dict):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
-    db.create_engine('root', '123456', 'awesome_python_webapp')
+    db.create_engine('root', '123456', 'awesome')
     # db.update('drop table if exists user')
     # db.update('create table user (id int primary key, name text, email text, passwd text, last_modified real)')
     # import doctest
     # doctest.testmod()
-    class User(Model):
+    class Users(Model):
         id = IntegerField(primary_key=True)
         name = StringField()
         email = StringField(updatable=False)
-        passwd = StringField(default=lambda: '123456')
-        last_modified = FloatField()
+        password = StringField(default=lambda: '123456')
 
-        def pre_insert(self):
-            self.last_modified = time.time()
-
-        def pre_update(self):
-            self.last_modified = time.time()
-
-        def pre_update(self):
-            self.last_modified = time.time()
-
-    u = User(id=2, name='Michael', email='orm@db.org')
+    u = Users(id=2, name='Michael', email='orm@db.org')
     r = u.insert()
     print r
 

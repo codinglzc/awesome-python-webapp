@@ -8,7 +8,12 @@ create time: 2017-09-15
 disc: A simple, lightweight, WSGI-compatible web framework.
 """
 
-import threading, datetime, re, urllib, os, mimetypes, cgi, logging, functools, types
+import threading, datetime, re, urllib, os, mimetypes, cgi, logging, functools, types, sys, traceback
+
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
 
 # 全局 ThreadLocal 对象，用来存储request和response：
 ctx = threading.local()
@@ -1430,8 +1435,8 @@ class WSGIApplication(object):
         self._get_static = {}
         self._post_static = {}
 
-        self._get_dynamic = {}
-        self._post_dynamic = {}
+        self._get_dynamic = []
+        self._post_dynamic = []
 
     def _check_not_running(self):
         if self._running:
@@ -1458,25 +1463,111 @@ class WSGIApplication(object):
 
     # 添加一个URL定义：
     def add_url(self, func):
-        pass
+        self._check_not_running()
+        route = Route(func)
+        if route.is_static:
+            if route.method == 'GET':
+                self._get_static[route.path] = route
+            if route.method == 'POST':
+                self._post_static[route.path] = route
+        else:
+            if route.method == 'GET':
+                self._get_dynamic.append(route)
+            if route.method == 'POST':
+                self._post_dynamic.append(route)
+        logging.info('Add route: %s' % str(route))
 
     # 添加一个Interceptor定义：
     def add_interceptor(self, func):
-        pass
+        self._check_not_running()
+        self._interceptors.append(func)
+        logging.info('Add interceptor: %s' % str(func))
 
-    # 返回WSGI处理函数：
-    def get_wsgi_application(self):
-        def wsgi(env, start_response):
-            pass
-        return wsgi
-
-    # 开发模式下直接启动服务器：
     def run(self, port=9000, host='127.0.0.1'):
         from wsgiref.simple_server import make_server
-        server = make_server(host, port, self.get_wsgi_application())
+        logging.info('application (%s) will start at %s:%s...' % (self._document_root, port, host))
+        server = make_server(host, port, self.get_wsgi_application(debug=True))
         server.serve_forever()
 
+    # 返回WSGI处理函数：
+    def get_wsgi_application(self, debug=False):
+        self._check_not_running()
+        if debug:
+            self._get_dynamic.append(StaticFileRoute())
+        self._running = True
+
+        _application = Dict(document_root=self._document_root)
+
+        def fn_route():
+            request_method = ctx.request.request_method
+            path_info = ctx.request.path_info
+            if request_method == 'GET':
+                fn = self._get_static.get(path_info, None)
+                if fn:
+                    return fn()
+                for fn in self._get_dynamic:
+                    args = fn.match(path_info)
+                    if args:
+                        return fn(*args)
+                raise notfound()
+            if request_method == 'POST':
+                fn = self._post_static.get(path_info, None)
+                if fn:
+                    return fn()
+                for fn in self._post_dynamic:
+                    args = fn.match(path_info)
+                    if args:
+                        return fn(*args)
+                raise notfound()
+
+        fn_exec = _build_interceptor_chain(fn_route, *self._interceptors)
+
+        def wsgi(env, start_response):
+            ctx.application = _application
+            ctx.request = Request(env)
+            response = ctx.response = Response()
+            try:
+                r = fn_exec()
+                if isinstance(r, Template):
+                    r = self._template_engine(r.template_name, r.model)
+                if isinstance(r, unicode):
+                    r = r.encode('utf-8')
+                if r is None:
+                    r = []
+                start_response(response.status, response.headers)
+                return r
+            except RedirectError, e:
+                response.set_header('Location', e.location)
+                start_response(e.status, response.headers)
+                return []
+            except HttpError, e:
+                start_response(e.status, response.headers)
+                return ['<html><body><h1>', e.status, '</h1></body></html>']
+            except Exception, e:
+                logging.exception(e)
+                if not debug:
+                    start_response('500 Internal Server Error', [])
+                    return ['<html><body><h1>500 Internal Server Error</h1></body></html>']
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                fp = StringIO()
+                traceback.print_exception(exc_type, exc_value, exc_traceback, file=fp)
+                stacks = fp.getvalue()
+                fp.close()
+                start_response('500 Internal Server Error', [])
+                return [
+                    r'''<html><body><h1>500 Internal Server Error</h1><div style="font-family:Monaco, Menlo, Consolas, 'Courier New', monospace;"><pre>''',
+                    stacks.replace('<', '&lt;').replace('>', '&gt;'),
+                    '</pre></div></body></html>'
+                ]
+            finally:
+                del ctx.application
+                del ctx.request
+                del ctx.response
+
+        return wsgi
+
 if __name__ == '__main__':
+    sys.path.append('.')
     import doctest
 
     doctest.testmod()
